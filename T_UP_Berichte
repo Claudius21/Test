@@ -1,0 +1,115 @@
+// EVENT variable
+// This variable is automatically called if an event is received by [i/med] Cron
+
+$oEventDist = &$args[0]; // EVENTDIST entry
+
+$VAR_DEBUG = true;
+
+
+$oEventDistAPI = EventdistributorAPI::convertBusinessToAPI( $oEventDist );
+$oOrder = $oEventDistAPI->getOrder();
+if( $oOrder == null ) {
+	if( $VAR_DEBUG )
+		PVar( "Auftrag kann aus dem Event EVDID=" . $oEventDist->evdid . " nicht geladen werden." );
+	return true;
+}
+
+$oResult = $oOrder->getResultByMethod( "FALLTYP_UP" );
+if($oResult == null) {
+	if( $VAR_DEBUG )
+		PVar( "Auftrag ist kein UP-Fall" );
+	return true;
+}
+
+$oSperre = $oOrder->getResultByMethod( "UPCOMMENT" );
+if( $oSperre ){
+	PVar( "Sperre angefordert. Automatismus deaktiviert" );
+	return true;
+}
+
+
+$oSql = SqlAPI::getByID();
+//Prüfen, ob wir bereits irgendeine Afnorderung für eine Analyse haben
+$sSQL = "select R.RESID from RESULT R inner join LABORDERID LI on R.LABID=LI.LABID 
+	inner join METHODS M on R.METHODSHORT=M.SHORTNAME and LI.LABORID=M.LABORID 
+	inner join RAMMAP RM on M.METID=RM.METID
+	where R.LABID=".$oOrder->getID();
+PVar($sSQL);
+$sRes_arr = $oSql->selectMultiple($sSQL);
+if( count( $sRes_arr ) == 0 ){
+	PVar("Keine Analysen für Befund");
+	return true;
+}
+
+$bHasUPBericht = false;
+//START WENN UP-Auftrag
+PVar( "Auftrag ist ein UP-Fall" );
+if( $oOrder ->getOrderflag( ) == "CM" ){
+	foreach( $oOrder->getDocumentList( ) as $oOrderDoc ){
+		if( strpos( $oOrderDoc->getComments( ),"UP Bericht") === 0 ){
+			$bHasUPBericht = true;
+		}
+	}
+	if( $bHasUPBericht ){
+			PVar("UP Bericht existiert schon");
+			return true;
+	}
+	
+	$oDocument = new OfficeIntegrationAPI( "T/T_UP_Bericht_Einzel.docx", true );
+	$sPath = $oDocument->createWithOrder( $oOrder->getID( ) );
+	
+	PVar("Document created in Folder ".$sPath);
+	
+	$oPerson = $oOrder->getPerson( );
+	
+	$sBasePDFPath = dirname($sPath);
+	
+	$sPDFBaseName = $oPerson->getLastname( )."_".$oPerson->getFirstname( )."_".date("Ymd",$oPerson->getDateOfBirth())."_".date("YmdHi",$oOrder->getDrawDate( )).".pdf";
+	$sTmpString4DocCheck = date("Ymd",$oPerson->getDateOfBirth())."_".date("YmdHi",$oOrder->getDrawDate( )).".pdf";
+	
+	$sPDFPath = $sBasePDFPath."/".$sPDFBaseName;
+	
+	//$sPDFPath = str_replace("docx","pdf", $sPath);
+	
+	$oDWS = new DWSClientAPI();
+	if( strlen($sPDFPath) === 0 or !$oDWS->getPdfFromWord( $sPath, $sPDFPath ) ){
+		PVar("Fehler, konnte PDF nicht erstellen");
+		return false;
+	}
+	PVar("PDF erstellt in Verzeichnis ".$sPDFPath);
+	
+	copy($sPDFPath,"/imed/data/UPBerichte/".$sPDFBaseName);
+	//return true;
+	
+	if ($oOrder->addDocument( $sPDFPath )){
+		foreach( $oOrder->getDocumentList( ) as $oOrderDoc ){
+			PVar("Check Document ".$oOrderDoc->getFilename( )." with PDF ".$sPDFBaseName."");
+			if( strpos( $oOrderDoc->getFilename( ),$sTmpString4DocCheck) > 0 ){
+				if( $oOrderDoc->isDeleted( ) ){
+					continue;
+				}
+				$oOrderDoc->release( "Automatische Freigabe"  );
+				$oOrderDoc->setComment( "UP Bericht" );
+				$oOrderDoc->save( );
+				
+				//mph 12.06.19 Auto-Befund Versand temporär deaktiviert.
+				// mat, 09.07.2019, Nach OK von Björn wieder aktiviert
+				$sPDFDownloadPath = $oOrderDoc->exportDocument();
+				if( $sPDFDownloadPath ){
+					if( !$oDWS->sendResultReporting( $sPDFDownloadPath, "T", $oOrder->getInternalOrderNumber( ) ) ){
+						PVar("UP Bericht ('".$oOrderDoc->getFilename( )."') für Auftrag ".$oOrder->getInternalOrderNumber( )." konnte nicht über DWS verteilt werden!");
+					}
+					PVar("UP Bericht ('".$oOrderDoc->getFilename( )."') für Auftrag ".$oOrder->getInternalOrderNumber( )." über DWS verteilt!");	
+				}
+			}
+		}
+	} else {
+		PVar("Fehler: Konnte das Dokument dem Auftrag nicht hinzufuegen");
+	}
+}
+
+
+
+
+// Return always true.
+return true;
