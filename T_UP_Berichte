@@ -44,7 +44,7 @@ if( count( $sRes_arr ) == 0 ){
 $bHasUPBericht = false;
 //START WENN UP-Auftrag
 PVar( "Auftrag ist ein UP-Fall" );
-if( $oOrder ->getOrderflag( ) == "CM" ){
+if( $oOrder->getOrderflag( ) == "CM" ){
 	foreach( $oOrder->getDocumentList( ) as $oOrderDoc ){
 		if( strpos( $oOrderDoc->getComments( ),"UP Bericht") === 0 ){
 			$bHasUPBericht = true;
@@ -54,6 +54,34 @@ if( $oOrder ->getOrderflag( ) == "CM" ){
 			PVar("UP Bericht existiert schon");
 			return true;
 	}
+	/*
+	// Entnommen aus T_UP_Calc_TBS
+	// Textbausteine ermitteln und in UP Bericht automatisch einfügen
+	// Allerdings eingescränkt auf TB für CREA
+	$bOrderchanged = false;
+	
+	$oMacro = MacroAPI::getByName("T_Regelwerk_Befundung_UP");
+	if ($oMacro == null) {
+		PVar("Macro \"T_Regelwerk_Befundung_UP\" kann nicht geladen werden.");
+		return true;
+	}
+
+	$oResUP_arr = $oMacro->execute($oOrder->getID( ));	
+	
+	
+	foreach( $oResUP_arr as $sTBKey => $oVal ) {
+		// Eingeschränkt auf Crea
+		if( strpos($sTBKey,"G_CREA") !== false){
+			$oOrder->setResult( $sTBKey, "1", "", "", "", ResultAPI::ABNORMAL_LOW );
+			$bOrderchanged = true;
+		}
+		
+	}
+	if( $bOrderchanged ){
+		$oOrder->save(true, true);
+	}
+	*/
+	////////////// Textbausteineautomatisch ermitteln /////////////
 	
 	$oDocument = new OfficeIntegrationAPI( "T/T_UP_Bericht_Einzel.docx", true );
 	$sPath = $oDocument->createWithOrder( $oOrder->getID( ) );
